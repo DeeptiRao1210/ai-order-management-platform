@@ -24,7 +24,6 @@ inventory:
   service:
     url: http://localhost:8082
 
-springdoc:
-  swagger-ui:
-    path: /swagger-ui.html 
-
+payment:
+  service:
+    url: http://localhost:8084

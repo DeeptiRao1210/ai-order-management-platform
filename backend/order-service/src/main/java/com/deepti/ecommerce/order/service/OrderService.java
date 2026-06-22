@@ -9,8 +9,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.deepti.ecommerce.order.client.InventoryClient;
+import com.deepti.ecommerce.order.client.PaymentClient;
 import com.deepti.ecommerce.order.dto.OrderRequest;
 import com.deepti.ecommerce.order.dto.OrderResponse;
+import com.deepti.ecommerce.order.dto.PaymentRequest;
+import com.deepti.ecommerce.order.dto.PaymentResponse;
 import com.deepti.ecommerce.order.dto.ReserveInventoryRequest;
 import com.deepti.ecommerce.order.entity.Order;
 import com.deepti.ecommerce.order.entity.OrderItem;
@@ -26,6 +29,7 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final InventoryClient inventoryClient;
+    private final PaymentClient paymentClient;
 
     @Transactional
     public OrderResponse createOrder(OrderRequest request)
@@ -49,6 +53,10 @@ public class OrderService {
 
         order.setItems(orderItems);
         Order savedOrder = orderRepository.save(order);
+
+
+
+
         List<OrderItem> reservedItems = new ArrayList<>();
         try{
                for(OrderItem item: savedOrder.getItems())
@@ -61,12 +69,29 @@ public class OrderService {
                 } 
 
                 savedOrder.setStatus(OrderStatus.INVENTORY_RESERVED);
-                Order updatedOrder  = orderRepository.save(savedOrder);
+                orderRepository.save(savedOrder);
+                PaymentResponse paymentResponse = paymentClient.processPayment(new PaymentRequest(savedOrder.getId()
+                ,savedOrder.getTotalAmount(),"CARD"));
                 
-                return mapToResponse(updatedOrder);
+                if("SUCCESS".equalsIgnoreCase(paymentResponse.status()))
+                {
+                    savedOrder.setStatus(OrderStatus.CONFIRMED);
+                    Order confirmedOrder = orderRepository.save(savedOrder);
+                    return  mapToResponse(confirmedOrder);
+                }
+                
+                for(OrderItem reservedItem: reservedItems)
+                {
+                    inventoryClient.releaseInventory(new ReserveInventoryRequest(
+                        reservedItem.getProductId(),
+                        reservedItem.getQuantity() ))  ;               
+                }
+                savedOrder.setStatus(OrderStatus.FAILED);
+                Order failedOrder = orderRepository.save(savedOrder);
+                return mapToResponse(failedOrder);
 
         }
-        catch(FeignException ex)
+        catch(Exception ex)
         {
             for(OrderItem reservedItem: reservedItems)
             {
@@ -75,23 +100,24 @@ public class OrderService {
                     , reservedItem.getQuantity()));
 
                 }
-                catch(Exception releaseException)
+                catch(Exception rollBackException)
                 {
                     //send to Kafka
                 }
             }
             savedOrder.setStatus(OrderStatus.FAILED);
             orderRepository.save(savedOrder);
-            throw new RuntimeException("Order failed due to inventory-service error:"+ ex.getMessage());
+            throw new RuntimeException("Order failed. Saga RollBack completed. Reason : "+
+                                     (ex.getMessage()!=null?ex.getMessage():"Unknown Error"));
 
 
         }
-        catch(Exception ex)
-        {
-            savedOrder.setStatus(OrderStatus.FAILED);
-            orderRepository.save(savedOrder);
-            throw new RuntimeException("Order Creation failed: "+ ex.getMessage());
-        }
+       // catch(Exception ex)
+       // {
+        //    savedOrder.setStatus(OrderStatus.FAILED);
+        //    orderRepository.save(savedOrder);
+        //    throw new RuntimeException("Order Creation failed: "+ ex.getMessage());
+       // }
 
 
 
