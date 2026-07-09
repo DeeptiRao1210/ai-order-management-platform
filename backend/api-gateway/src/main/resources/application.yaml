@@ -11,26 +11,42 @@ spring:
         webflux:
           routes:
             - id: product-service
-              uri: http://localhost:8081
+              uri: lb://product-service
               predicates:
                 - Path=/api/products/**
 
             - id: inventory-service
-              uri: http://localhost:8082
+              uri: lb://inventory-service
               predicates:
                 - Path=/api/inventory/**
 
             - id: order-service
-              uri: http://localhost:8083
+              uri: lb://order-service
               predicates:
                 - Path=/api/orders/**
             
             - id: payment-service
-              uri: http://localhost:8084
+              uri: lb://payment-service
               predicates:
                 - Path=/api/payments/**
+
+            - id: auth-service
+              uri: lb://auth-service
+              predicates:
+                - Path=/api/auth/**
+
+
 management:
   endpoints:
     web:
       exposure:
         include: health,info,gateway
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+
+jwt:
+  secret: ${JWT_SECRET}
+  
