@@ -14,21 +14,67 @@ spring:
               uri: lb://product-service
               predicates:
                 - Path=/api/products/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: productGatewayCircuitBreaker
+                    fallbackUri: forward:/fallback/products
+                    statusCodes:
+                      - 500
+                      - 502
+                      - 503
+                      - 504
+
 
             - id: inventory-service
               uri: lb://inventory-service
               predicates:
                 - Path=/api/inventory/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: inventoryGatewayCircuitBreaker
+                    fallbackUri: forward:/fallback/inventory
+                    statusCodes:
+                      - 500
+                      - 502
+                      - 503
+                      - 504
 
             - id: order-service
               uri: lb://order-service
               predicates:
                 - Path=/api/orders/**
-            
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: orderGatewayCircuitBreaker
+                    fallbackUri: forward:/fallback/orders
+                    statusCodes:
+                      - 500
+                      - 502
+                      - 503
+                      - 504
+
+
+
             - id: payment-service
               uri: lb://payment-service
               predicates:
                 - Path=/api/payments/**
+              filters:
+                - name: CircuitBreaker
+                  args:
+                    name: paymentGatewayCircuitBreaker
+                    fallbackUri: forward:/fallback/payments
+                    statusCodes:
+                      - 500
+                      - 502
+                      - 503
+                      - 504
+
+
+
 
             - id: auth-service
               uri: lb://auth-service
@@ -40,7 +86,15 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,gateway
+        include:  health,info,metrics,circuitbreakers,circuitbreakerevents
+  
+  endpoint:
+    health:
+      show-details: always
+
+  health:
+    circuitbreakers:
+      enabled: true
 
 eureka:
   client:
@@ -50,3 +104,45 @@ eureka:
 jwt:
   secret: ${JWT_SECRET}
   
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      gatewayDefault:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        waitDurationInOpenState: 15s
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+
+    instances:
+      productGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+      orderGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+      inventoryGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+      paymentGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+  timelimiter:
+    configs:
+      gatewayDefault:
+        timeoutDuration: 5s 
+
+    instances:
+      productGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+      orderGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+      inventoryGatewayCircuitBreaker:
+        baseConfig: gatewayDefault
+
+      paymentGatewayCircuitBreaker:
+        baseConfig: gatewayDefault                 

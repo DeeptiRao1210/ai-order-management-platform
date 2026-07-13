@@ -26,4 +26,7 @@ InventoryResponse releaseInventory(@RequestBody ReserveInventoryRequest request)
 @GetMapping("/api/inventory/{productId}")
 InventoryResponse  getInventoryByProductId(@PathVariable Long productId);
 
+@PostMapping("/api/inventory/confirm")
+InventoryResponse confirmInventory(@RequestBody ReserveInventoryRequest request);
+
 }

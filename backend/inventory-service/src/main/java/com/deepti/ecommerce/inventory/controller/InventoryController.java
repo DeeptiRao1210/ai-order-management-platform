@@ -66,4 +66,11 @@ public class InventoryController {
         return inventoryService.updateStock(productId, quantity);
     }
 
+    @PostMapping("/confirm")
+    public InventoryResponse confirmInventory(@Valid @RequestBody ReserveInventoryRequest request) {
+      
+       return inventoryService.confirmInventory(request);
+    }
+    
+
 }

@@ -3,6 +3,7 @@ package com.deepti.ecommerce.inventory.service;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.PostMapping;
 
 import com.deepti.ecommerce.inventory.dto.InventoryRequest;
 import com.deepti.ecommerce.inventory.dto.InventoryResponse;
@@ -101,5 +102,21 @@ public class InventoryService {
 
    }
 
+   @Transactional
+   public InventoryResponse confirmInventory(ReserveInventoryRequest request)
+   {
+        Inventory inventory = inventoryRepository.findByProductId(request.productId())
+                              .orElseThrow(()->
+                              new InventoryNotFoundException("Inventory not found for product :"+ request.productId()));
+
+        if(inventory.getReservedQuantity() < request.quantity())
+        {
+            throw new InsufficientInventoryException("Reserved Quantity is less than confirm quantity");
+        }  
+        
+        inventory.setReservedQuantity(inventory.getReservedQuantity()-request.quantity());
+
+        return mapToResponse(inventoryRepository.save(inventory));
+   }
 
 }

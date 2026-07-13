@@ -27,3 +27,9 @@ inventory:
 payment:
   service:
     url: http://localhost:8084
+
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka

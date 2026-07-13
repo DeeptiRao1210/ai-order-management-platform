@@ -75,6 +75,14 @@ public class OrderService {
                 
                 if("SUCCESS".equalsIgnoreCase(paymentResponse.status()))
                 {
+                   for(OrderItem item: reservedItems)
+                   {
+                    inventoryClient.confirmInventory(new ReserveInventoryRequest(item.getProductId(),
+                                                     item.getQuantity() )) ;   
+                   }
+                   
+                   
+                   
                     savedOrder.setStatus(OrderStatus.CONFIRMED);
                     Order confirmedOrder = orderRepository.save(savedOrder);
                     return  mapToResponse(confirmedOrder);
