@@ -19,17 +19,29 @@ import com.deepti.ecommerce.order.entity.Order;
 import com.deepti.ecommerce.order.entity.OrderItem;
 import com.deepti.ecommerce.order.entity.OrderStatus;
 import com.deepti.ecommerce.order.repository.OrderRepository;
+import com.deepti.ecommerce.order.service.integration.InventoryServiceGateway;
+import com.deepti.ecommerce.order.service.integration.PaymentServiceGateway;
 
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
 
 @Service
-@RequiredArgsConstructor
+
 public class OrderService {
 
     private final OrderRepository orderRepository;
-    private final InventoryClient inventoryClient;
-    private final PaymentClient paymentClient;
+    private final InventoryServiceGateway inventoryServiceGateway;
+    private final PaymentServiceGateway paymentServiceGateway;
+
+    public OrderService(OrderRepository orderRepository, InventoryServiceGateway inventoryServiceGateway,PaymentServiceGateway paymentServiceGateway)
+    {
+        this.orderRepository = orderRepository;
+        this.inventoryServiceGateway = inventoryServiceGateway;
+        this.paymentServiceGateway = paymentServiceGateway;
+    }
+
+
+
 
     @Transactional
     public OrderResponse createOrder(OrderRequest request)
@@ -59,77 +71,108 @@ public class OrderService {
 
         List<OrderItem> reservedItems = new ArrayList<>();
         try{
-               for(OrderItem item: savedOrder.getItems())
-                {
-                    inventoryClient.reserveInventory(new ReserveInventoryRequest(
-                        item.getProductId(), 
-                        item.getQuantity()));
+             reserveAllInventory(savedOrder, reservedItems);
+             savedOrder.setStatus(OrderStatus.INVENTORY_RESERVED);
+             orderRepository.save(savedOrder);
+             
+             PaymentResponse paymentResponse = paymentServiceGateway.processPayment(
+              new PaymentRequest(savedOrder.getId(), savedOrder.getTotalAmount(), "CARD")
+            );
+            
+            return handlePaymentResult(savedOrder,reservedItems, paymentResponse);
+             
 
-                     reservedItems.add(item);       
-                } 
-
-                savedOrder.setStatus(OrderStatus.INVENTORY_RESERVED);
-                orderRepository.save(savedOrder);
-                PaymentResponse paymentResponse = paymentClient.processPayment(new PaymentRequest(savedOrder.getId()
-                ,savedOrder.getTotalAmount(),"CARD"));
-                
-                if("SUCCESS".equalsIgnoreCase(paymentResponse.status()))
-                {
-                   for(OrderItem item: reservedItems)
-                   {
-                    inventoryClient.confirmInventory(new ReserveInventoryRequest(item.getProductId(),
-                                                     item.getQuantity() )) ;   
-                   }
-                   
-                   
-                   
-                    savedOrder.setStatus(OrderStatus.CONFIRMED);
-                    Order confirmedOrder = orderRepository.save(savedOrder);
-                    return  mapToResponse(confirmedOrder);
-                }
-                
-                for(OrderItem reservedItem: reservedItems)
-                {
-                    inventoryClient.releaseInventory(new ReserveInventoryRequest(
-                        reservedItem.getProductId(),
-                        reservedItem.getQuantity() ))  ;               
-                }
-                savedOrder.setStatus(OrderStatus.FAILED);
-                Order failedOrder = orderRepository.save(savedOrder);
-                return mapToResponse(failedOrder);
 
         }
         catch(Exception ex)
         {
-            for(OrderItem reservedItem: reservedItems)
-            {
-                try{
-                        inventoryClient.releaseInventory(new ReserveInventoryRequest(reservedItem.getProductId()
-                    , reservedItem.getQuantity()));
-
-                }
-                catch(Exception rollBackException)
-                {
-                    //send to Kafka
-                }
-            }
+            compensateInventoryReservations(reservedItems);
             savedOrder.setStatus(OrderStatus.FAILED);
             orderRepository.save(savedOrder);
-            throw new RuntimeException("Order failed. Saga RollBack completed. Reason : "+
-                                     (ex.getMessage()!=null?ex.getMessage():"Unknown Error"));
-
-
+            throw new RuntimeException("Order failed. Saga compensation initiated. Reason: "
+                            + getExceptionMessage(ex), ex);
+            
         }
-       // catch(Exception ex)
-       // {
-        //    savedOrder.setStatus(OrderStatus.FAILED);
-        //    orderRepository.save(savedOrder);
-        //    throw new RuntimeException("Order Creation failed: "+ ex.getMessage());
-       // }
+     
 
 
 
     }
+
+    private void reserveAllInventory(Order savedOrder, List<OrderItem> reservedItems)
+    {
+        for(OrderItem item: savedOrder.getItems())
+        {
+            ReserveInventoryRequest inventoryRequest = new ReserveInventoryRequest(
+                                                        item.getProductId(),
+                                                        item.getQuantity());
+
+            inventoryServiceGateway.reserveInventory(inventoryRequest);
+            reservedItems.add(item);
+
+        }
+    }
+
+    private OrderResponse handlePaymentResult(Order savedOrder, List<OrderItem> reservedItems, PaymentResponse paymentResponse)
+    {
+        if(paymentResponse == null)
+        {
+            throw new IllegalStateException("Payment service returned an empty response.");
+        }
+
+        String paymentStatus = paymentResponse.status();
+        if("SUCCESS".equalsIgnoreCase(paymentStatus))
+        {
+            confirmAllInventory(reservedItems);
+            savedOrder.setStatus(OrderStatus.CONFIRMED);
+            Order confirmedOrder = orderRepository.save(savedOrder);
+            return mapToResponse(confirmedOrder);
+        }
+
+        if("PENDING".equalsIgnoreCase(paymentStatus) || "UNKNOWN".equalsIgnoreCase(paymentStatus) ||"PROCESSING".equalsIgnoreCase(paymentStatus))
+        {
+            savedOrder.setStatus(OrderStatus.PAYMENT_PENDING);
+            Order pendingOrder = orderRepository.save(savedOrder);
+            return mapToResponse(pendingOrder);
+        }
+        compensateInventoryReservations(reservedItems);
+        savedOrder.setStatus(OrderStatus.FAILED);
+        Order failedOrder = orderRepository.save(savedOrder);
+        return mapToResponse(failedOrder);
+
+    }
+
+    private void confirmAllInventory(List<OrderItem> reservedItems)
+    {
+        for(OrderItem item: reservedItems)
+        {
+            inventoryServiceGateway.confirmInventory(new ReserveInventoryRequest(item.getProductId(),
+                                                      item.getQuantity()));                                                                            
+        }
+    }
+
+
+    private void compensateInventoryReservations(List<OrderItem> reservedItems)
+    {
+        for(OrderItem reservedItem: reservedItems)
+        {
+            try{
+                inventoryServiceGateway.releaseInventory(new ReserveInventoryRequest(reservedItem.getProductId(),
+                                                        reservedItem.getQuantity()));
+            }
+            catch(Exception compensationException)
+            {
+                 System.err.println(
+                        "Inventory release failed for productId="
+                                + reservedItem.getProductId()
+                                + ", reason="
+                                + getExceptionMessage(compensationException)
+                );
+            }
+        }
+    }
+
+
 
 
     public OrderResponse getOrderById(Long id)
@@ -152,6 +195,10 @@ public class OrderService {
         Order order = orderRepository.findById(id)
                         .orElseThrow(()-> new RuntimeException("Order not found with id: "+id));
 
+        if(order.getStatus() == OrderStatus.CONFIRMED)
+        {
+            throw new IllegalStateException("A confirmed order cannot be cancelled directly.");
+        }
         order.setStatus(OrderStatus.CANCELLED);
         return mapToResponse(orderRepository.save(order)) ;               
     }
@@ -167,5 +214,12 @@ public class OrderService {
                                  order.getCreatedAt() );
     }
 
+
+    private String getExceptionMessage(Throwable throwable) {
+
+        return throwable.getMessage() != null
+                ? throwable.getMessage()
+                : throwable.getClass().getSimpleName();
+    }
 
 }

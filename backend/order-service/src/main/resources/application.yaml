@@ -20,6 +20,22 @@ spring:
         format_sql: true
     database-platform: org.hibernate.dialect.MySQLDialect
 
+  cloud:
+    openfeign:
+      client:
+        config:
+
+          inventory-service:
+            connectTimeout: 2000
+            readTimeout: 3000
+            loggerLevel: basic
+
+          payment-service:
+            connectTimeout: 2000
+            readTimeout: 5000
+            loggerLevel: basic
+
+
 inventory:
   service:
     url: http://localhost:8082
@@ -33,3 +49,51 @@ eureka:
   client:
     service-url:
       defaultZone: http://localhost:8761/eureka
+
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      downstreamServiceDefault:
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 5
+        minimumNumberOfCalls: 3
+        failureRateThreshold: 50
+        slowCallRateThreshold: 50
+        slowCallDurationThreshold: 3s
+        permittedNumberOfCallsInHalfOpenState: 2
+        waitDurationInOpenState: 10s
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+
+    instances:
+      inventoryServiceCircuitBreaker:
+        baseConfig: downstreamServiceDefault
+
+      paymentServiceCircuitBreaker:
+        baseConfig: downstreamServiceDefault
+
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+          - metrics
+          - circuitbreakers
+          - circuitbreakerevents
+
+  endpoint:
+    health:
+      show-details: always
+
+  health:
+    circuitbreakers:
+      enabled: true
+
+
+logging:
+  level:
+    com.deepti.ecommerce.orderservice.client.InventoryClient: DEBUG
+    com.deepti.ecommerce.orderservice.client.PaymentClient: DEBUG
