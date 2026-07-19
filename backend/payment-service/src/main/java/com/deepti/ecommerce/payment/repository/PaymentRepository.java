@@ -11,5 +11,5 @@ import com.deepti.ecommerce.payment.entity.Payment;
 public interface PaymentRepository extends JpaRepository<Payment,Long> {
 
     Optional<Payment> findByOrderId(Long orderId);
-
+    Optional<Payment> findByIdempotencyKey(String idempotencyKey);
 }

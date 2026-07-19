@@ -18,6 +18,7 @@ import com.deepti.ecommerce.order.dto.ReserveInventoryRequest;
 import com.deepti.ecommerce.order.entity.Order;
 import com.deepti.ecommerce.order.entity.OrderItem;
 import com.deepti.ecommerce.order.entity.OrderStatus;
+import com.deepti.ecommerce.order.exception.PaymentRequestConflictException;
 import com.deepti.ecommerce.order.repository.OrderRepository;
 import com.deepti.ecommerce.order.service.integration.InventoryServiceGateway;
 import com.deepti.ecommerce.order.service.integration.PaymentServiceGateway;
@@ -66,6 +67,8 @@ public class OrderService {
         order.setItems(orderItems);
         Order savedOrder = orderRepository.save(order);
 
+        String idempotencyKey =
+        "ORDER-PAYMENT-" + savedOrder.getId();
 
 
 
@@ -75,7 +78,7 @@ public class OrderService {
              savedOrder.setStatus(OrderStatus.INVENTORY_RESERVED);
              orderRepository.save(savedOrder);
              
-             PaymentResponse paymentResponse = paymentServiceGateway.processPayment(
+             PaymentResponse paymentResponse = paymentServiceGateway.processPayment(idempotencyKey,
               new PaymentRequest(savedOrder.getId(), savedOrder.getTotalAmount(), "CARD")
             );
             
@@ -89,6 +92,22 @@ public class OrderService {
             compensateInventoryReservations(reservedItems);
             savedOrder.setStatus(OrderStatus.FAILED);
             orderRepository.save(savedOrder);
+             if (ex instanceof PaymentRequestConflictException
+            conflictException) 
+            {
+
+                throw conflictException;
+            }
+
+            if (ex instanceof IllegalArgumentException
+            illegalArgumentException)
+            {
+
+                throw illegalArgumentException;
+            }    
+
+
+
             throw new RuntimeException("Order failed. Saga compensation initiated. Reason: "
                             + getExceptionMessage(ex), ex);
             

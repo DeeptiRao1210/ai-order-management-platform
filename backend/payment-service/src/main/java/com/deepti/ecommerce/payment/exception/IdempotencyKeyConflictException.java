@@ -1,0 +1,15 @@
+package com.deepti.ecommerce.payment.exception;
+
+public class IdempotencyKeyConflictException extends RuntimeException{
+ 
+    public IdempotencyKeyConflictException(String message) {
+        super(message);
+    }
+
+    public IdempotencyKeyConflictException(
+            String message,
+            Throwable cause) {
+
+        super(message, cause);
+    }
+}
